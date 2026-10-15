@@ -34,6 +34,7 @@ One **Period** filter (last 3/6/10/12 months, year to date, any single year or m
   - large one-time charges
 - **Transactions**: search, filter, sort, and recategorize. Changing a category applies to every charge from that merchant and is remembered in your browser.
 - **Recurring**: charges on a steady schedule, with cadence, yearly cost and whether they're still active
+- **Ask** (only when the page is opened inside Claude): chat with Claude about your transactions. Claude answers by running lookups on the loaded data (totals by merchant, category, month or account; matching rows; recurring charges; findings), and each answer links to the transactions it used. On GitHub Pages or a plain browser this tab stays hidden.
 - **Files**: what was read from each file, the account and period it covers, and anything skipped
 
 ## How it works

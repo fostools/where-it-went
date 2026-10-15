@@ -45,7 +45,7 @@ body { background: var(--bg); color: var(--ink); font-family: var(--f-body); fon
 .wrap { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px }
 h1, h2, h3 { font-family: var(--f-display); margin: 0; text-wrap: balance; letter-spacing: -0.01em }
 .num, td.amt, .mono { font-family: var(--f-data); font-variant-numeric: tabular-nums }
-button, select, input { font: inherit; color: inherit }
+button, select, input, textarea { font: inherit; color: inherit }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
 
 /* header */
@@ -105,6 +105,23 @@ button, select, input { font: inherit; color: inherit }
 .sk-link { cursor: pointer; transition: fill-opacity .15s }
 .chart text.sk-lbl { fill: var(--ink); font-family: var(--f-body); font-size: 12px; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; cursor: pointer }
 .chart text.sk-lbl tspan.v { fill: var(--ink-3); font-family: var(--f-data); font-size: 11px }
+.ask { display: flex; flex-direction: column; gap: 12px; max-width: 860px }
+.log { display: flex; flex-direction: column; gap: 12px; min-height: 240px }
+.msg { padding: 12px 14px; border-radius: 12px; max-width: 100%; min-width: 0; overflow-wrap: anywhere }
+.msg.user { align-self: flex-end; background: var(--accent); color: var(--accent-ink); max-width: 80%; white-space: pre-wrap }
+.msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); width: 100% }
+.msg.bot p { margin: 0 0 8px } .msg.bot p:last-child { margin-bottom: 0 }
+.msg.bot ul, .msg.bot ol { margin: 0 0 8px; padding-left: 20px }
+.msg.bot table { margin: 6px 0 10px; font-size: 12.5px } .msg.bot .tw { overflow-x: auto }
+.msg.bot td, .msg.bot th { padding: 5px 8px }
+.msg .status { color: var(--ink-3); font-size: 12.5px }
+.msg .views { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px }
+.msg .views button, .sugg button { border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); border-radius: 999px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; text-align: left }
+.msg .views button:hover, .sugg button:hover { border-color: var(--accent) }
+.sugg { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px }
+.askbar { display: flex; gap: 8px; align-items: flex-end; position: sticky; bottom: env(safe-area-inset-bottom, 0px); background: var(--bg); padding-block: 8px }
+.askbar textarea { flex: 1; min-width: 0; resize: none; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 10px 12px; max-height: 160px; line-height: 1.4 }
+.linkbtn { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 0; font-size: 12px }
 .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; box-shadow: 0 6px 20px rgb(0 0 0 / .14); min-width: 180px; z-index: 3 }
 .tip .t { font-weight: 600; margin-bottom: 6px }
 .tip .row { display: flex; justify-content: space-between; gap: 16px }
@@ -202,6 +219,7 @@ button.toprow:hover { background: var(--surface-2) }
       <button class="tab" role="tab" data-tab="overview" aria-selected="true" id="tab-overview">Overview</button>
       <button class="tab" role="tab" data-tab="transactions" aria-selected="false" id="tab-transactions">Transactions</button>
       <button class="tab" role="tab" data-tab="recurring" aria-selected="false" id="tab-recurring">Recurring</button>
+      <button class="tab" role="tab" data-tab="ask" aria-selected="false" id="tab-ask" hidden>Ask</button>
       <button class="tab" role="tab" data-tab="files" aria-selected="false" id="tab-files">Files</button>
     </div>
     <div class="filters">
@@ -276,6 +294,21 @@ button.toprow:hover { background: var(--surface-2) }
     <p class="muted" style="font-size:12.5px">A charge counts as recurring when the same merchant bills a similar amount on a steady schedule (weekly, monthly, quarterly or yearly). "Stopped" means no charge since one cycle past the last expected date.</p>
   </section>
 
+  <section id="p-ask" role="tabpanel" aria-labelledby="tab-ask" hidden>
+    <div class="ask">
+      <div class="log" id="askLog" aria-live="polite">
+        <div class="msg bot intro"><p>Ask anything about the transactions loaded on this page. I look up the actual numbers before answering, so totals come from your data rather than guesses.</p>
+          <div class="sugg" id="askSugg"></div></div>
+      </div>
+      <form class="askbar" id="askForm">
+        <textarea id="askInput" rows="1" placeholder="e.g. How much did I spend on dining in September?" aria-label="Your question"></textarea>
+        <button class="btn primary" id="askSend" type="submit">Ask</button>
+        <button class="btn" id="askStop" type="button" hidden>Stop</button>
+      </form>
+      <p class="muted" style="font-size:12px;margin:0">Answers use your Claude account. Claude sees your account and category names plus what its lookups return, nothing else from your files. <button type="button" class="linkbtn" id="askClear">Clear conversation</button></p>
+    </div>
+  </section>
+
   <section id="p-files" role="tabpanel" aria-labelledby="tab-files" hidden>
     <div class="tool"><button class="btn" id="btnClear" type="button">Remove all files</button><span class="status">Duplicate statements are detected and skipped, so it's safe to add overlapping exports.</span></div>
     <div class="tablewrap"><table id="fileTable"><thead><tr>
@@ -303,7 +336,7 @@ const fmtDate = d => { const [y,m,dd] = d.split("-"); return MON[+m-1] + " " + (
 /* ---------- state ---------- */
 const S = { files: [], txns: [], sample: true, tab: "overview", sort: { key: "date", dir: -1 }, shown: 100, overrides: {} };
 try { S.overrides = JSON.parse(localStorage.getItem("sl-overrides") || "{}") || {}; } catch (e) { S.overrides = {}; }
-try { const t = localStorage.getItem("sl-tab"); if (t) S.tab = t; } catch (e) {}
+try { const t = localStorage.getItem("sl-tab"); if (t && t !== "ask") S.tab = t; } catch (e) {}
 
 /* ---------- normalisation helpers ---------- */
 function pad(n){ return String(n).padStart(2,"0"); }
@@ -1081,7 +1114,7 @@ function renderFiles() {
 function showTab(name) {
   S.tab = name; try { localStorage.setItem("sl-tab", name); } catch (e) {}
   document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
-  ["overview", "transactions", "recurring", "files"].forEach(p => $("#p-" + p).hidden = p !== name);
+  ["overview", "transactions", "recurring", "ask", "files"].forEach(p => $("#p-" + p).hidden = p !== name);
   if (name === "overview") { renderMonthChart(filtered().filter(t => t.kind === "spend")); renderSankey(); }
 }
 function setStatus(s) { $("#status").textContent = s; }
@@ -1163,6 +1196,155 @@ function loadSample() {
   setStatus("Showing sample data");
 }
 loadSample();
+
+/* ---------- Ask (Claude, via the viewer's account) ---------- */
+const ASK = { turns: [], ctl: null, sample: null };
+const ASK_RULES = `You answer questions about the viewer's own bank and credit card transactions, loaded into a spending dashboard.
+Rules:
+- Never guess numbers. Use the tools to look things up; every amount you state must come from a tool result.
+- Amounts: positive = money spent (outflow), negative = refunds, payments or income. "Spending" means kind "spend".
+- Card payments and transfers between the viewer's own accounts are not spending.
+- Dates are YYYY-MM-DD. "This year" means the year of the latest transaction unless the viewer says otherwise.
+- Unless the viewer names a period or account, use the page's current filter, given below.
+- Keep answers short and direct: lead with the answer, then a few supporting bullets or a small Markdown table. US dollars.
+- If the data can't answer the question, say what's missing.`;
+
+function askContext() {
+  const [s0, e0] = rangeBounds(), a = $("#fAcct").value;
+  const ds = S.txns.map(t => t.date).sort();
+  return `Page filter right now: period = ${periodLabel()}${s0 || e0 ? ` (${s0 || "start"} to ${e0 || "end"})` : ""}; account = ${a || "all accounts"}.
+Data loaded: ${S.txns.length} transactions from ${ds[0] || "?"} to ${ds[ds.length - 1] || "?"}.${S.sample ? " NOTE: this is made-up sample data, not the viewer's own." : ""}
+Accounts: ${[...new Set(S.txns.map(t => t.account))].join("; ")}.
+Categories: ${[...new Set(S.txns.map(t => t.category))].join(", ")}.`;
+}
+function qTx(o) {
+  const q = String(o.search || "").toLowerCase().trim();
+  const cat = o.category ? String(o.category).toLowerCase() : "", acct = o.account ? String(o.account).toLowerCase() : "";
+  const kind = o.kind == null ? "spend" : String(o.kind);
+  return S.txns.filter(t => (!o.start || t.date >= o.start) && (!o.end || t.date <= o.end) &&
+    (!cat || t.category.toLowerCase() === cat) && (!acct || t.account.toLowerCase().includes(acct)) &&
+    (kind === "any" || t.kind === kind) &&
+    (!q || (t.merchant + " " + t.desc).toLowerCase().includes(q)) &&
+    (o.min_amount == null || t.amount >= +o.min_amount) && (o.max_amount == null || t.amount <= +o.max_amount));
+}
+const r2 = v => Math.round(v * 100) / 100;
+function askTools(views) {
+  return [
+    { name: "query_transactions",
+      description: "Filter transactions and return either totals grouped by merchant/category/month/account, or the matching rows. Returns count and total for the match. Use group_by for 'how much' questions; use rows to list specific charges.",
+      inputSchema: { type: "object", properties: {
+        start: { type: "string", description: "YYYY-MM-DD inclusive" }, end: { type: "string", description: "YYYY-MM-DD inclusive" },
+        category: { type: "string", description: "exact category name" }, account: { type: "string", description: "part of the account name" },
+        search: { type: "string", description: "text in merchant or description, case-insensitive" },
+        kind: { type: "string", enum: ["spend", "income", "transfer", "any"], description: "default spend" },
+        min_amount: { type: "number" }, max_amount: { type: "number" },
+        group_by: { type: "string", enum: ["none", "merchant", "category", "month", "account"], description: "default none (rows)" },
+        sort: { type: "string", enum: ["amount_desc", "amount_asc", "date_desc", "date_asc"] },
+        limit: { type: "number", description: "rows or groups to return, max 60" },
+        label: { type: "string", description: "short human label for this lookup, e.g. 'Dining in Sep 2026'" } } },
+      execute(o) {
+        const rows = qTx(o), total = rows.reduce((a, t) => a + t.amount, 0), lim = Math.min(60, Math.max(1, +o.limit || 25));
+        if (rows.length) views.push({ label: String(o.label || o.search || o.category || "Matching transactions"), ids: rows.map(t => t.id) });
+        const out = { count: rows.length, total: r2(total) };
+        const g = o.group_by && o.group_by !== "none" ? o.group_by : null;
+        if (g) {
+          const by = {}; rows.forEach(t => { const k = g === "month" ? t.date.slice(0, 7) : g === "merchant" ? t.merchant : g === "category" ? t.category : t.account; (by[k] = by[k] || { total: 0, count: 0 }); by[k].total += t.amount; by[k].count++; });
+          let arr = Object.entries(by).map(([k, v]) => ({ [g]: k, total: r2(v.total), count: v.count }));
+          arr.sort(g === "month" ? (a, b) => a.month.localeCompare(b.month) : (a, b) => b.total - a.total);
+          out.groups = arr.slice(0, lim); if (arr.length > lim) out.more_groups = arr.length - lim;
+        } else {
+          const srt = o.sort || "date_desc";
+          rows.sort((a, b) => srt === "amount_desc" ? b.amount - a.amount : srt === "amount_asc" ? a.amount - b.amount : srt === "date_asc" ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date));
+          out.rows = rows.slice(0, lim).map(t => ({ date: t.date, merchant: t.merchant, description: t.desc.slice(0, 60), category: t.category, account: t.account, amount: r2(t.amount) }));
+          if (rows.length > lim) out.more_rows = rows.length - lim;
+        }
+        return out;
+      } },
+    { name: "recurring_charges",
+      description: "Recurring charges detected across all loaded data: merchant, category, cadence, typical amount, yearly cost, number of charges, last charge date, and whether still active.",
+      execute() { return detectRecurring(S.txns).slice(0, 50).map(r => ({ merchant: r.merchant, category: r.category, cadence: r.cadence, typical: r2(r.typical), per_year: r2(r.perYear), charges: r.count, last: r.last.date, active: r.active })); } },
+    { name: "findings",
+      description: "The dashboard's automatic findings for the current page filter: fees and interest, cash advances, possible duplicates, overlapping subscriptions, price increases, spike months, large one-off charges.",
+      execute() { const tx = filtered(); return insights(tx, detectRecurring(tx)).map(i => ({ title: i.title.replace(/<[^>]+>/g, ""), detail: String(i.body).replace(/<[^>]+>/g, ""), items: (i.list || []).map(x => String(x).replace(/<[^>]+>/g, "")) })); } },
+  ];
+}
+function mdToHtml(md) {
+  const lines = esc(md).split("\n"); let html = "", list = null, tbl = [];
+  const inline = s => s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  const flushT = () => { if (!tbl.length) return; const rows = tbl.filter(r => !/^\s*\|?\s*:?-{2,}/.test(r)).map(r => r.replace(/^\s*\||\|\s*$/g, "").split("|").map(c => inline(c.trim()))); html += `<div class="tw"><table><thead><tr>${rows[0].map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${rows.slice(1).map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; tbl = []; };
+  const flushL = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const ln of lines) {
+    if (/^\s*\|.*\|\s*$/.test(ln)) { flushL(); tbl.push(ln); continue; } else flushT();
+    let m;
+    if ((m = ln.match(/^\s*[-*•]\s+(.*)/))) { if (list !== "ul") { flushL(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; }
+    else if ((m = ln.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== "ol") { flushL(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; }
+    else if ((m = ln.match(/^#{1,4}\s+(.*)/))) { flushL(); html += `<p><strong>${inline(m[1])}</strong></p>`; }
+    else if (ln.trim()) { flushL(); html += `<p>${inline(ln)}</p>`; }
+    else flushL();
+  }
+  flushT(); flushL(); return html;
+}
+function askSuggestions() {
+  const sp = filtered().filter(t => t.kind === "spend");
+  const byM = {}; sp.forEach(t => byM[t.merchant] = (byM[t.merchant] || 0) + t.amount);
+  const topM = Object.entries(byM).sort((a, b) => b[1] - a[1])[0];
+  const list = ["What were my 5 biggest expenses this year?", "Which month did I spend the most, and why?", "How much did I pay in interest and fees?", "List my subscriptions and what they cost per year"];
+  if (topM) list.splice(1, 0, `How much have I spent at ${topM[0]}, by month?`);
+  $("#askSugg").innerHTML = list.map(q => `<button type="button">${esc(q)}</button>`).join("");
+  $("#askSugg").querySelectorAll("button").forEach(b => b.onclick = () => { $("#askInput").value = b.textContent; askSend(); });
+}
+function askBubble(cls, html) { const d = document.createElement("div"); d.className = "msg " + cls; d.innerHTML = html; $("#askLog").appendChild(d); d.scrollIntoView({ block: "end", behavior: "smooth" }); return d; }
+const ASK_ERR = { rate_limited: "You've hit a usage limit for now. Try again in a little while.", session_expired: "Your Claude session expired. Sign in again, then retry.", refused: "Claude couldn't answer that one. Try rephrasing.", prompt_too_large: "That needs too much data at once. Try a narrower question (one month or one category).", empty_completion: "No answer came back. Try rephrasing.", upstream_error: "The connection dropped. Try again." };
+async function askSend() {
+  const box = $("#askInput"), q = box.value.trim();
+  if (!q || ASK.ctl || !ASK.sample) return;
+  box.value = ""; box.style.height = "";
+  askBubble("user", esc(q));
+  ASK.turns.push({ role: "user", content: q });
+  const views = [];
+  const bot = askBubble("bot", '<div class="status">Looking at your transactions…</div>');
+  const ctl = ASK.ctl = new AbortController();
+  $("#askSend").hidden = true; $("#askStop").hidden = false;
+  const turns = ASK.turns.slice(-12); while (turns.length && turns[0].role !== "user") turns.shift();
+  const input = [{ role: "user", content: ASK_RULES + "\n\n" + askContext() }, ...turns];
+  const tools = askTools(views).map(t => ({ ...t, execute: (inp, c) => { bot.querySelector(".status") && (bot.querySelector(".status").textContent = "Looking up " + (inp && inp.label ? inp.label : t.name.replace(/_/g, " ")) + "…"); return t.execute(inp || {}, c); } }));
+  let final = "";
+  try {
+    const res = await ASK.sample(input, { signal: ctl.signal, tools, onText: ({ text }) => { final = text; bot.innerHTML = mdToHtml(text); } });
+    final = res.text; bot.innerHTML = mdToHtml(final) + (res.truncated ? '<p class="status">Cut short. Ask for less at a time.</p>' : "");
+    ASK.turns.push({ role: "assistant", content: final });
+  } catch (e) {
+    if (e.code === "not_granted" || e.code === "sampling_disabled" || e.code === "capability_disabled" || e.code === "not_declared" || e.code === "tools_unavailable") { bot.innerHTML = '<p class="status">Asking Claude isn\'t available here. You can turn it on from this page\'s Permissions menu.</p>'; ASK.turns.pop(); }
+    else if (e.code === "cancelled") { bot.innerHTML = (e.text ? mdToHtml(e.text) : "") + '<p class="status">Stopped.</p>'; if (e.text) ASK.turns.push({ role: "assistant", content: e.text }); else ASK.turns.pop(); }
+    else { bot.innerHTML = (e.text ? mdToHtml(e.text) : "") + `<p class="status">${esc(ASK_ERR[e.code] || ASK_ERR.upstream_error)}</p>`; if (e.text) ASK.turns.push({ role: "assistant", content: e.text }); else ASK.turns.pop(); }
+  } finally {
+    ASK.ctl = null; $("#askSend").hidden = false; $("#askStop").hidden = true;
+  }
+  const seen = new Set(), uniq = views.filter(v => { const k = v.ids.length + "|" + v.ids.slice(0, 5).join(","); if (seen.has(k)) return false; seen.add(k); return true; }).slice(-4);
+  if (uniq.length) {
+    const wrap = document.createElement("div"); wrap.className = "views";
+    uniq.forEach(v => { const b = document.createElement("button"); b.type = "button"; b.textContent = `View ${v.ids.length} transaction${v.ids.length > 1 ? "s" : ""}: ${v.label} →`; b.onclick = () => drillTo(v.label, v.ids); wrap.appendChild(b); });
+    bot.appendChild(wrap);
+  }
+}
+$("#askForm").addEventListener("submit", e => { e.preventDefault(); askSend(); });
+$("#askInput").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); askSend(); } });
+$("#askInput").addEventListener("input", e => { const t = e.target; t.style.height = ""; t.style.height = Math.min(160, t.scrollHeight) + "px"; });
+$("#askStop").onclick = () => ASK.ctl && ASK.ctl.abort();
+$("#askClear").onclick = () => { if (ASK.ctl) ASK.ctl.abort(); ASK.turns = []; $("#askLog").querySelectorAll(".msg:not(.intro)").forEach(m => m.remove()); };
+document.querySelector('[data-tab="ask"]').addEventListener("click", askSuggestions);
+(async () => {
+  try {
+    if (!window.claude || typeof window.claude.use !== "function") return;   // not inside Claude (e.g. GitHub Pages): no Ask tab
+    const sample = await window.claude.use("sample");
+    if (!sample) return;
+    const lim = await sample.limits().catch(() => null);
+    if (!lim || !lim.tools) return;
+    ASK.sample = sample;
+    $("#tab-ask").hidden = false;
+    if (S.tab === "ask") showTab("ask");
+  } catch (e) { /* stays hidden */ }
+})();
 </script>
 
 </body>
