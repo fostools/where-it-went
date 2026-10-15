@@ -22,7 +22,7 @@ img { max-width: 100% }
 :root {
   --bg: #f2f4f1; --surface: #ffffff; --surface-2: #eaeee9; --ink: #16201b; --ink-2: #4a5550; --ink-3: #737d77;
   --line: #dbe0da; --accent: #0d6e50; --accent-ink: #ffffff; --accent-soft: #dbeee5;
-  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --other: #b6bdb8;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948; --other: #b6bdb8;
   --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
   --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
   --f-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
@@ -32,11 +32,11 @@ img { max-width: 100% }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #0f1311; --surface: #171c19; --surface-2: #1f2522; --ink: #edf1ee; --ink-2: #b6bfb9; --ink-3: #87918b;
   --line: #2a312d; --accent: #3db487; --accent-ink: #08130e; --accent-soft: #1a362a;
-  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --other: #4b544f; color-scheme: dark } }
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --other: #4b544f; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #0f1311; --surface: #171c19; --surface-2: #1f2522; --ink: #edf1ee; --ink-2: #b6bfb9; --ink-3: #87918b;
   --line: #2a312d; --accent: #3db487; --accent-ink: #08130e; --accent-soft: #1a362a;
-  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --other: #4b544f; color-scheme: dark }
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --other: #4b544f; color-scheme: dark }
 
 * { box-sizing: border-box }
 [hidden] { display: none !important }
@@ -101,6 +101,10 @@ button, select, input { font: inherit; color: inherit }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--ink-2) }
 .legend span { display: inline-flex; align-items: center; gap: 6px }
 .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block }
+.sk-node { cursor: pointer }
+.sk-link { cursor: pointer; transition: fill-opacity .15s }
+.chart text.sk-lbl { fill: var(--ink); font-family: var(--f-body); font-size: 12px; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; cursor: pointer }
+.chart text.sk-lbl tspan.v { fill: var(--ink-3); font-family: var(--f-data); font-size: 11px }
 .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; box-shadow: 0 6px 20px rgb(0 0 0 / .14); min-width: 180px; z-index: 3 }
 .tip .t { font-weight: 600; margin-bottom: 6px }
 .tip .row { display: flex; justify-content: space-between; gap: 16px }
@@ -224,6 +228,11 @@ button.toprow:hover { background: var(--surface-2) }
         <div class="card span-4">
           <header><div><h2>By category</h2><div class="sub">Share of spending · click to see transactions</div></div></header>
           <div class="cats" id="cats"></div>
+        </div>
+        <div class="card span-12">
+          <header><div><h2>Money flow</h2><div class="sub" id="skSub">Account → category → biggest merchants · click any part to see its transactions</div></div>
+            <div class="filters"><label for="skPeriod">Show</label><select id="skPeriod"></select></div></header>
+          <div class="chart" id="sankey"></div>
         </div>
         <div class="card span-7">
           <header><div><h2>Things to look at</h2><div class="sub">Patterns found in your transactions</div></div></header>
@@ -813,6 +822,7 @@ function render() {
   renderCats(spend);
   renderInsights(tx, rec);
   renderTop(spend);
+  renderSankey();
   renderTx(tx);
   renderRec(rec);
   renderFiles();
@@ -892,6 +902,98 @@ function drillTo(label, ids) {
   $("#tCat").value = ""; $("#tKind").value = ""; $("#tSearch").value = ""; S.shown = 100;
   showTab("transactions"); renderTx(filtered());
 }
+function renderSankey() {
+  const box = $("#sankey"), sel = $("#skPeriod");
+  const acctF = $("#fAcct").value;
+  const base = S.txns.filter(t => t.kind === "spend" && (!acctF || t.account === acctF));
+  const years = [...new Set(base.map(t => t.date.slice(0, 4)))].sort().reverse();
+  const months = [...new Set(base.map(t => t.date.slice(0, 7)))].sort().reverse();
+  const opts = [["all", "All dates"], ...years.map(y => ["y:" + y, "Year " + y]), ...months.map(m => ["m:" + m, MON[+m.slice(5) - 1] + " " + m.slice(0, 4)])];
+  const key = opts.map(o => o[0]).join(",");
+  if (sel.dataset.key !== key) {
+    const cur = sel.value;
+    sel.innerHTML = `<option value="all">All dates</option><optgroup label="Year">${years.map(y => `<option value="y:${y}">${y}</option>`).join("")}</optgroup><optgroup label="Month">${months.map(m => `<option value="m:${m}">${MON[+m.slice(5) - 1]} ${m.slice(0, 4)}</option>`).join("")}</optgroup>`;
+    sel.dataset.key = key;
+    sel.value = opts.some(o => o[0] === cur) ? cur : (years.length ? "y:" + years[0] : "all");
+  }
+  const v = sel.value;
+  const tx = v === "all" ? base : base.filter(t => t.date.startsWith(v.slice(2)));
+  const narrow = (box.clientWidth || 700) < 640;
+  // aggregate
+  const catNet = {}; tx.forEach(t => catNet[t.category] = (catNet[t.category] || 0) + t.amount);
+  const cats = Object.entries(catNet).filter(([, x]) => x > 0).sort((a, b) => b[1] - a[1]);
+  const topCats = cats.slice(0, 8).map(c => c[0]);
+  const OTHER = "Everything else";
+  const catOf = t => topCats.includes(t.category) ? t.category : OTHER;
+  const links = new Map(); // key -> {s, t, v, ids}
+  const addLink = (s, t, amt, id) => { const k = s + "\u0001" + t; const l = links.get(k) || { s, t, v: 0, ids: [] }; l.v += amt; l.ids.push(id); links.set(k, l); };
+  tx.forEach(t => addLink("a:" + t.account, "c:" + catOf(t), t.amount, t.id));
+  if (!narrow) {
+    const mByCat = {};
+    tx.forEach(t => { const c = catOf(t); if (c === OTHER || topCats.indexOf(c) > 4) return; (mByCat[c] = mByCat[c] || {}); (mByCat[c][t.merchant] = mByCat[c][t.merchant] || { v: 0, ids: [] }); mByCat[c][t.merchant].v += t.amount; mByCat[c][t.merchant].ids.push(t.id); });
+    const total0 = cats.reduce((a, c) => a + c[1], 0);
+    for (const [c, ms] of Object.entries(mByCat)) Object.entries(ms).filter(([, o]) => o.v > total0 * 0.015).sort((a, b) => b[1].v - a[1].v).slice(0, 3).forEach(([m, o]) => { const l = { s: "c:" + c, t: "m:" + c + "\u0001" + m, v: o.v, ids: o.ids }; links.set(l.s + "\u0001" + l.t, l); });
+  }
+  const L = [...links.values()].filter(l => l.v > 0.5);
+  if (!L.length) { box.innerHTML = '<div class="empty">No spending in this period.</div>'; $("#skSub").textContent = "Account → category → biggest merchants"; return; }
+  // nodes
+  const nodes = new Map();
+  const node = id => { if (!nodes.has(id)) { const col = id[0] === "a" ? 0 : id[0] === "c" ? 1 : 2; const raw = id.slice(2); nodes.set(id, { id, col, name: col === 2 ? raw.split("\u0001")[1] : raw, cat: col === 1 ? raw : col === 2 ? raw.split("\u0001")[0] : null, in: 0, out: 0, ids: [] }); } return nodes.get(id); };
+  L.forEach(l => { const a = node(l.s), b = node(l.t); a.out += l.v; b.in += l.v; if (a.col === 0) a.ids.push(...l.ids); b.ids.push(...l.ids); });
+  nodes.forEach(n => n.v = Math.max(n.in, n.out));
+  const colors = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7", "--s8"].map(cssv);
+  const colorOf = c => c === OTHER ? cssv("--other") : colors[topCats.indexOf(c)] || cssv("--other");
+  const catRank = c => c === OTHER ? 99 : topCats.indexOf(c);
+  const cols = [0, 1, 2].map(c => [...nodes.values()].filter(n => n.col === c));
+  cols[0].sort((a, b) => b.v - a.v);
+  cols[1].sort((a, b) => catRank(a.name) - catRank(b.name));
+  cols[2].sort((a, b) => catRank(a.cat) - catRank(b.cat) || b.v - a.v);
+  const ncols = cols[2].length ? 3 : 2;
+  const W = Math.max(320, box.clientWidth || 700), gap = 14, nodeW = 10, pt = 6;
+  const maxN = Math.max(...cols.map(c => c.length));
+  const H = Math.max(280, Math.min(760, maxN * 34 + 20));
+  const totals = cols.map(c => c.reduce((a, n) => a + n.v, 0));
+  const k = Math.min(...cols.filter(c => c.length).map((c, i) => (H - pt * 2 - (c.length - 1) * gap) / totals[cols.indexOf(c)]));
+  const rightLbl = ncols === 3 ? 235 : 170;
+  const X = ncols === 3 ? [0, Math.round((W - rightLbl - nodeW) * 0.42), W - rightLbl - nodeW] : [0, Math.round(W * 0.47)];
+  cols.forEach((c, ci) => { if (!c.length) return; let y = pt; c.forEach(n => { n.x = X[ci]; n.y = y; n.h = Math.max(1.5, n.v * k); n.so = 0; n.ti = 0; y += n.h + gap; }); });
+  L.forEach(l => { l.a = nodes.get(l.s); l.b = nodes.get(l.t); });
+  L.sort((p, q) => p.b.y - q.b.y).forEach(l => { l.y0 = l.a.y + l.a.so; l.a.so += l.v * k; });
+  L.sort((p, q) => p.a.y - q.a.y).forEach(l => { l.y1 = l.b.y + l.b.ti; l.b.ti += l.v * k; });
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending flow from accounts to categories to merchants">`;
+  L.forEach((l, i) => {
+    const x0 = l.a.x + nodeW, x1 = l.b.x, w = l.v * k, mx = (x0 + x1) / 2;
+    const c = colorOf(l.b.col === 1 ? l.b.name : l.b.cat);
+    svg += `<path class="sk-link" data-l="${i}" d="M${x0},${l.y0}C${mx},${l.y0} ${mx},${l.y1} ${x1},${l.y1}L${x1},${l.y1 + w}C${mx},${l.y1 + w} ${mx},${l.y0 + w} ${x0},${l.y0 + w}Z" fill="${c}" fill-opacity="0.32"/>`;
+  });
+  const N = [...nodes.values()];
+  N.forEach((n, i) => {
+    const c = n.col === 0 ? cssv("--ink-3") : colorOf(n.col === 1 ? n.name : n.cat);
+    svg += `<rect class="sk-node" data-n="${i}" x="${n.x}" y="${n.y}" width="${nodeW}" height="${n.h}" rx="2" fill="${c}"/>`;
+    const tx = n.x + nodeW + 6, ty = n.y + n.h / 2 + 4;
+    const maxC = narrow ? (n.col === 0 ? 14 : 18) : 24; const nm = n.name.length > maxC ? n.name.slice(0, maxC - 1) + "…" : n.name;
+    svg += `<text class="sk-lbl" data-n="${i}" x="${tx}" y="${ty}">${esc(nm)} <tspan class="v">${shortMoney(n.v)}</tspan></text>`;
+  });
+  svg += "</svg>";
+  box.innerHTML = svg + '<div class="tip" hidden></div>';
+  const total = totals[1];
+  const plabel = v === "all" ? "all dates" : v[0] === "y" ? v.slice(2) : MON[+v.slice(7) - 1] + " " + v.slice(2, 6);
+  $("#skSub").textContent = `${money(total)} of spending in ${plabel} · click any part to see its transactions`;
+  const tip = box.querySelector(".tip");
+  const place = e => { const bx = box.getBoundingClientRect(); let x = e.clientX - bx.left + 14; if (x + 220 > bx.width) x = e.clientX - bx.left - 230; tip.style.left = Math.max(0, x) + "px"; tip.style.top = (e.clientY - bx.top + 12) + "px"; };
+  box.querySelectorAll(".sk-link").forEach(p => {
+    const l = L[+p.dataset.l];
+    p.addEventListener("mousemove", e => { tip.innerHTML = `<div class="t">${esc(l.a.name)} → ${esc(l.b.name)}</div><div class="row"><span class="k">${l.ids.length} transactions</span><span class="num">${money(l.v)}</span></div><div class="row"><span class="k">Share of ${esc(l.a.name)}</span><span class="num">${(l.v / l.a.v * 100).toFixed(0)}%</span></div>`; tip.hidden = false; place(e); p.setAttribute("fill-opacity", "0.6"); });
+    p.addEventListener("mouseleave", () => { tip.hidden = true; p.setAttribute("fill-opacity", "0.32"); });
+    p.addEventListener("click", () => drillTo(`${l.a.name} → ${l.b.name} · ${plabel}`, l.ids));
+  });
+  box.querySelectorAll(".sk-node, .sk-lbl").forEach(el => {
+    const n = N[+el.dataset.n];
+    el.addEventListener("mousemove", e => { tip.innerHTML = `<div class="t">${esc(n.name)}</div><div class="row"><span class="k">${n.col === 0 ? "Spent from this account" : "Total"}</span><span class="num">${money(n.v)}</span></div><div class="row"><span class="k">Share of all spending</span><span class="num">${(n.v / total * 100).toFixed(1)}%</span></div>`; tip.hidden = false; place(e); });
+    el.addEventListener("mouseleave", () => { tip.hidden = true; });
+    el.addEventListener("click", () => drillTo(`${n.name} · ${plabel}`, n.ids));
+  });
+}
 function renderTop(spend) {
   const by = {}; spend.forEach(t => { const k = t.merchant; by[k] = by[k] || { v: 0, n: 0, cats: {} }; by[k].v += t.amount; by[k].n++; by[k].cats[t.category] = (by[k].cats[t.category] || 0) + t.amount; });
   Object.values(by).forEach(o => o.c = Object.entries(o.cats).sort((a, b) => b[1] - a[1])[0][0]);
@@ -942,7 +1044,7 @@ function showTab(name) {
   S.tab = name; try { localStorage.setItem("sl-tab", name); } catch (e) {}
   document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
   ["overview", "transactions", "recurring", "files"].forEach(p => $("#p-" + p).hidden = p !== name);
-  if (name === "overview") renderMonthChart(filtered().filter(t => t.kind === "spend"));
+  if (name === "overview") { renderMonthChart(filtered().filter(t => t.kind === "spend")); renderSankey(); }
 }
 function setStatus(s) { $("#status").textContent = s; }
 function announce(s) { $("#live").textContent = s; }
@@ -973,6 +1075,7 @@ $("#fRange").onchange = () => { const c = $("#fRange").value === "custom"; $("#f
 $("#fStart").onchange = $("#fEnd").onchange = $("#fAcct").onchange = () => render();
 $("#tSearch").oninput = () => { S.shown = 100; renderTx(filtered()); };
 $("#tCat").onchange = $("#tKind").onchange = () => { S.shown = 100; renderTx(filtered()); };
+$("#skPeriod").onchange = () => renderSankey();
 $("#drillClear").onclick = () => { S.drill = null; $("#tKind").value = "spend"; S.shown = 100; renderTx(filtered()); };
 document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => { if (b.dataset.tab === "transactions" && S.drill) { S.drill = null; $("#tKind").value = "spend"; renderTx(filtered()); } }));
 $("#btnMore").onclick = () => { S.shown += 200; renderTx(filtered()); };
@@ -984,7 +1087,7 @@ $("#btnCopy").onclick = async () => {
   try { await navigator.clipboard.writeText(csv); setStatus(`Copied ${rows.length} rows to the clipboard.`); }
   catch (e) { const ta = document.createElement("textarea"); ta.value = csv; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); setStatus(`Copied ${rows.length} rows.`); } catch (e2) { setStatus("Copy isn't available here. Select rows in the table instead."); } ta.remove(); }
 };
-let rT; window.addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(() => { if (S.tab === "overview") renderMonthChart(filtered().filter(t => t.kind === "spend")); }, 150); });
+let rT; window.addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(() => { if (S.tab === "overview") { renderMonthChart(filtered().filter(t => t.kind === "spend")); renderSankey(); } }, 150); });
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => render());
 new MutationObserver(() => render()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
