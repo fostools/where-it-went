@@ -19,7 +19,7 @@ Overlapping or repeated statements are detected, so the same transaction is neve
 
 ## What it shows
 
-- **Overview**: total and monthly spending, income, interest and fees, recurring cost, a monthly chart stacked by category, spending by category, top merchants
+- **Overview**: total and monthly spending, income, interest and fees, recurring cost, a monthly chart stacked by category, spending by category, top merchants. Click a category, a merchant, or "View transactions" on any finding to see the transactions behind it.
 - **Things to look at**:
   - interest and fees by account
   - cash-advance charges (for example, Venmo paid with a credit card)

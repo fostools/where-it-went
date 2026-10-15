@@ -154,6 +154,15 @@ td select:hover, td select:focus { border-color: var(--line); background: var(--
 .merch { display: flex; flex-direction: column; gap: 2px }
 .toprow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line) }
 .toprow:last-child { border-bottom: 0 }
+button.toprow { width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line); text-align: left; cursor: pointer; padding: 7px 8px; margin: 0 -8px; width: calc(100% + 16px); border-radius: 8px; align-items: center }
+button.toprow:last-child { border-bottom: 0 }
+button.toprow:hover { background: var(--surface-2) }
+.drill { grid-column: 2; justify-self: start; margin-top: 6px; border: 0; background: transparent; color: var(--accent); font-weight: 600; font-size: 13px; padding: 2px 0; cursor: pointer }
+.drill:hover { text-decoration: underline }
+.filterchip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; background: var(--accent-soft); color: var(--ink); border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 13px; font-weight: 500 }
+.filterchip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.filterchip button { border: 0; background: transparent; cursor: pointer; font-size: 16px; line-height: 1; width: 22px; height: 22px; border-radius: 50%; color: var(--ink-2) }
+.filterchip button:hover { background: var(--surface) }
 .toprow .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0) }
 @media (prefers-reduced-motion: no-preference) { .cat .fill { transition: width .4s ease } }
@@ -230,6 +239,7 @@ td select:hover, td select:focus { border-color: var(--line); background: var(--
 
   <section id="p-transactions" role="tabpanel" aria-labelledby="tab-transactions" hidden>
     <div class="tool">
+      <span class="filterchip" id="drillChip" hidden><span></span><button type="button" id="drillClear" aria-label="Clear this filter">×</button></span>
       <input type="search" id="tSearch" placeholder="Search merchant or description" aria-label="Search transactions">
       <select id="tCat" aria-label="Category filter"><option value="">All categories</option></select>
       <select id="tKind" aria-label="Type filter">
@@ -742,33 +752,33 @@ function insights(tx, rec) {
   if (feeTot > 0) {
     const byAcct = {}; fees.forEach(t => byAcct[t.account] = (byAcct[t.account] || 0) + t.amount);
     const rows = Object.entries(byAcct).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([a, v]) => `${esc(a)}: ${money(v)}`);
-    out.push({ sev: feeTot > 250 ? "crit" : feeTot > 50 ? "warn" : "info", score: feeTot * 3, title: `${money(feeTot)} paid in interest and fees`, body: `${fees.length} charges. Paying cards in full each month removes most of this.`, list: rows });
+    out.push({ sev: feeTot > 250 ? "crit" : feeTot > 50 ? "warn" : "info", score: feeTot * 3, title: `${money(feeTot)} paid in interest and fees`, body: `${fees.length} charges. Paying cards in full each month removes most of this.`, list: rows, ids: fees.map(t => t.id) });
   }
   // cash advances
   const ca = tx.filter(t => /cash advance|^transaction fee/i.test(t.desc) && t.amount > 0);
   if (ca.length) {
     const p2p = spend.filter(t => /venmo|paypal|cash app|zelle/i.test(t.desc + t.merchant) && ca.some(c => c.account === t.account && Math.abs(daysBetween(t.date, c.date)) <= 5));
     const tot = ca.reduce((a, t) => a + t.amount, 0);
-    out.push({ sev: "crit", score: 5000 + tot, title: `Cash-advance charges: ${money(tot)}`, body: p2p.length ? `${p2p.length} payment${p2p.length > 1 ? "s" : ""} through ${esc([...new Set(p2p.map(t => t.merchant))].join(", "))} on a credit card were treated as cash advances (fee plus higher interest from day one). Pay people by bank transfer instead.` : "Cash advances carry an upfront fee and interest from day one." });
+    out.push({ sev: "crit", score: 5000 + tot, title: `Cash-advance charges: ${money(tot)}`, body: p2p.length ? `${p2p.length} payment${p2p.length > 1 ? "s" : ""} through ${esc([...new Set(p2p.map(t => t.merchant))].join(", "))} on a credit card were treated as cash advances (fee plus higher interest from day one). Pay people by bank transfer instead.` : "Cash advances carry an upfront fee and interest from day one.", ids: [...ca, ...p2p].map(t => t.id) });
   }
   // duplicates
   const dups = []; const bym = {};
   for (const t of spend) { if (t.amount < 15) continue; const k = mkey(t.merchant) + "|" + t.amount.toFixed(2); (bym[k] = bym[k] || []).push(t); }
-  for (const list of Object.values(bym)) { if (list.length > 3) continue; list.sort((a, b) => a.date.localeCompare(b.date)); for (let i = 1; i < list.length; i++) if (daysBetween(list[i - 1].date, list[i].date) <= 3 && list[i - 1].id !== list[i].id) dups.push([list[i - 1], list[i]]); }
-  if (dups.length) out.push({ sev: "warn", score: 900 + dups.length, title: `${dups.length} possible duplicate charge${dups.length > 1 ? "s" : ""}`, body: "Same merchant, same amount, within three days. Worth a quick check; some may be legitimate (two tickets, for example).", list: dups.slice(0, 5).map(([a, b]) => `${esc(a.merchant)} · ${money(a.amount)} on ${fmtDate(a.date)} and ${fmtDate(b.date)}`) });
+  for (const list of Object.values(bym)) { list.sort((a, b) => a.date.localeCompare(b.date)); if (list.length > 3 && median(list.slice(1).map((t, i) => daysBetween(list[i].date, t.date))) < 10) continue; for (let i = 1; i < list.length; i++) if (daysBetween(list[i - 1].date, list[i].date) <= 3 && list[i - 1].id !== list[i].id) dups.push([list[i - 1], list[i]]); }
+  if (dups.length) out.push({ sev: "warn", score: 900 + dups.length, title: `${dups.length} possible duplicate charge${dups.length > 1 ? "s" : ""}`, body: "Same merchant, same amount, within three days. Worth a quick check; some may be legitimate (two tickets, for example).", list: dups.slice(0, 5).map(([a, b]) => `${esc(a.merchant)} · ${money(a.amount)} on ${fmtDate(a.date)} and ${fmtDate(b.date)}`), ids: dups.flat().map(t => t.id) });
   // overlapping subscriptions
   const act = rec.filter(r => r.active);
   for (const [name, rx] of OVERLAPS) {
     const hits = act.filter(r => rx.test(r.merchant + " " + r.txns[0].desc));
-    const byM = new Map(); hits.forEach(h => { const k = mkey(h.merchant); const o = byM.get(k) || { name: h.merchant, perYear: 0, plans: [] }; o.perYear += h.perYear; o.plans.push(money(h.typical) + " " + h.cadence.toLowerCase()); byM.set(k, o); });
+    const byM = new Map(); hits.forEach(h => { const k = mkey(h.merchant); const o = byM.get(k) || { name: h.merchant, perYear: 0, plans: [], ids: [] }; o.perYear += h.perYear; o.plans.push(money(h.typical) + " " + h.cadence.toLowerCase()); o.ids.push(...h.txns.map(t => t.id)); byM.set(k, o); });
     const uniq = [...byM.values()];
-    if (uniq.length >= 2) out.push({ sev: "warn", score: 700 + uniq.reduce((a, r) => a + r.perYear, 0) / 10, title: `${uniq.length} overlapping ${name} services`, body: `Together about ${money(uniq.reduce((a, r) => a + r.perYear, 0))} a year. You may only need one.`, list: uniq.map(r => `${esc(r.name)}: ${r.plans.join(" + ")}`) });
+    if (uniq.length >= 2) out.push({ sev: "warn", score: 700 + uniq.reduce((a, r) => a + r.perYear, 0) / 10, title: `${uniq.length} overlapping ${name} services`, body: `Together about ${money(uniq.reduce((a, r) => a + r.perYear, 0))} a year. You may only need one.`, list: uniq.map(r => `${esc(r.name)}: ${r.plans.join(" + ")}`), ids: uniq.flatMap(r => r.ids) });
   }
   const multi = new Map(); act.filter(r => r.multiPlan && r.days < 40 && r.category === "Subscriptions").forEach(r => { const k = mkey(r.merchant); const o = multi.get(k) || { name: r.merchant, list: [] }; o.list.push(r); multi.set(k, o); });
-  for (const o of multi.values()) if (o.list.length >= 2) out.push({ sev: "warn", score: 750, title: `${esc(o.name)} charges you ${o.list.length} times a month`, body: `${o.list.map(r => money(r.typical)).join(" + ")}, about ${money(o.list.reduce((a, r) => a + r.perYear, 0))} a year. Check for a duplicate plan or account.` });
+  for (const o of multi.values()) if (o.list.length >= 2) out.push({ sev: "warn", score: 750, title: `${esc(o.name)} charges you ${o.list.length} times a month`, body: `${o.list.map(r => money(r.typical)).join(" + ")}, about ${money(o.list.reduce((a, r) => a + r.perYear, 0))} a year. Check for a duplicate plan or account.`, ids: o.list.flatMap(r => r.txns.map(t => t.id)) });
   // price increases
   const ups = act.filter(r => r.priceUp && !r.varies && r.category !== "Utilities");
-  if (ups.length) out.push({ sev: "info", score: 400, title: `${ups.length} recurring charge${ups.length > 1 ? "s" : ""} went up in price`, body: "Compared with the first charge in this period.", list: ups.slice(0, 5).map(r => `${esc(r.merchant)}: ${money(r.priceUp[0])} → ${money(r.priceUp[1])}`) });
+  if (ups.length) out.push({ sev: "info", score: 400, title: `${ups.length} recurring charge${ups.length > 1 ? "s" : ""} went up in price`, body: "Compared with the first charge in this period.", list: ups.slice(0, 5).map(r => `${esc(r.merchant)}: ${money(r.priceUp[0])} → ${money(r.priceUp[1])}`), ids: ups.flatMap(r => r.txns.map(t => t.id)) });
   // spike months
   const ms = monthSpan(spend);
   if (ms.length >= 4) {
@@ -776,13 +786,13 @@ function insights(tx, rec) {
     const med = median(tot);
     const spikes = ms.map((m, i) => [m, tot[i]]).filter(([, v]) => v > med * 1.5 && v - med > 300);
     if (spikes.length) {
-      out.push({ sev: "info", score: 300, title: `${spikes.length} month${spikes.length > 1 ? "s" : ""} well above your typical ${money(med)}`, body: "The biggest category in each spike month:", list: spikes.slice(0, 4).map(([m, v]) => { const bc = {}; spend.filter(t => t.date.startsWith(m)).forEach(t => bc[t.category] = (bc[t.category] || 0) + t.amount); const top = Object.entries(bc).sort((a, b) => b[1] - a[1])[0]; return `${monthLabel(m)}: ${money(v)} (${esc(top[0])} ${money(top[1])})`; }) });
+      out.push({ sev: "info", score: 300, title: `${spikes.length} month${spikes.length > 1 ? "s" : ""} well above your typical ${money(med)}`, body: "The biggest category in each spike month:", list: spikes.slice(0, 4).map(([m, v]) => { const bc = {}; spend.filter(t => t.date.startsWith(m)).forEach(t => bc[t.category] = (bc[t.category] || 0) + t.amount); const top = Object.entries(bc).sort((a, b) => b[1] - a[1])[0]; return `${monthLabel(m)}: ${money(v)} (${esc(top[0])} ${money(top[1])})`; }), ids: spend.filter(t => spikes.slice(0, 4).some(([m]) => t.date.startsWith(m))).map(t => t.id) });
     }
   }
   // big one-offs
   const recIds = new Set(rec.flatMap(r => r.txns.map(t => t.id)));
   const big = spend.filter(t => !recIds.has(t.id) && t.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 5);
-  if (big.length && big[0].amount > 500) out.push({ sev: "info", score: 200, title: "Largest one-time charges", body: "Not part of a recurring pattern.", list: big.map(t => `${esc(t.merchant)} · ${money(t.amount)} · ${fmtDate(t.date)}`) });
+  if (big.length && big[0].amount > 500) out.push({ sev: "info", score: 200, title: "Largest one-time charges", body: "Not part of a recurring pattern.", list: big.map(t => `${esc(t.merchant)} · ${money(t.amount)} · ${fmtDate(t.date)}`), ids: big.map(t => t.id) });
   // duplicate files
   const dupFiles = S.files.filter(f => f.result === "dup");
   if (dupFiles.length) out.push({ sev: "good", score: 100, title: `${dupFiles.length} duplicate file${dupFiles.length > 1 ? "s" : ""} skipped`, body: esc(dupFiles.map(f => f.name).join(", ")) + " repeated statements already loaded, so they weren't counted twice." });
@@ -869,23 +879,31 @@ function renderCats(spend) {
   const rows = Object.entries(by).filter(([, o]) => o.v > 0).sort((a, b) => b[1].v - a[1].v);
   const max = rows.length ? rows[0][1].v : 1;
   $("#cats").innerHTML = rows.length ? rows.slice(0, 10).map(([c, o]) => `<button class="cat" type="button" data-cat="${esc(c)}"><span class="nm">${esc(c)}</span><span class="am">${money(o.v)}</span><span class="track"><span class="fill" style="width:${(o.v / max * 100).toFixed(1)}%"></span></span><span class="meta">${(o.v / tot * 100).toFixed(1)}% · ${money(o.v / months)}/mo · ${o.n} transactions</span></button>`).join("") : '<div class="empty">No spending in this period.</div>';
-  $("#cats").querySelectorAll(".cat").forEach(b => b.onclick = () => { $("#tCat").value = b.dataset.cat; $("#tKind").value = "spend"; $("#tSearch").value = ""; S.shown = 100; showTab("transactions"); renderTx(filtered()); });
+  $("#cats").querySelectorAll(".cat").forEach(b => b.onclick = () => { S.drill = null; $("#tCat").value = b.dataset.cat; $("#tKind").value = "spend"; $("#tSearch").value = ""; S.shown = 100; showTab("transactions"); renderTx(filtered()); });
 }
 function renderInsights(tx, rec) {
   const list = insights(tx, rec);
   const label = { crit: "Act now", warn: "Review", info: "Pattern", good: "Good" };
-  $("#insights").innerHTML = list.map(i => `<div class="ins"><span class="chip ${i.sev}">${label[i.sev]}</span><h3>${i.title}</h3><p>${i.body}</p>${i.list ? "<ul>" + i.list.map(x => `<li>${x}</li>`).join("") + "</ul>" : ""}</div>`).join("");
+  $("#insights").innerHTML = list.map((i, n) => { const k = i.ids ? new Set(i.ids).size : 0; return `<div class="ins"><span class="chip ${i.sev}">${label[i.sev]}</span><h3>${i.title}</h3><p>${i.body}</p>${i.list ? "<ul>" + i.list.map(x => `<li>${x}</li>`).join("") + "</ul>" : ""}${k ? `<button class="drill" type="button" data-n="${n}">View ${k} transaction${k > 1 ? "s" : ""} →</button>` : ""}</div>`; }).join("");
+  $("#insights").querySelectorAll(".drill").forEach(b => b.onclick = () => { const i = list[+b.dataset.n]; drillTo(i.title.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&"), i.ids); });
+}
+function drillTo(label, ids) {
+  S.drill = { label, ids: new Set(ids) };
+  $("#tCat").value = ""; $("#tKind").value = ""; $("#tSearch").value = ""; S.shown = 100;
+  showTab("transactions"); renderTx(filtered());
 }
 function renderTop(spend) {
   const by = {}; spend.forEach(t => { const k = t.merchant; by[k] = by[k] || { v: 0, n: 0, cats: {} }; by[k].v += t.amount; by[k].n++; by[k].cats[t.category] = (by[k].cats[t.category] || 0) + t.amount; });
   Object.values(by).forEach(o => o.c = Object.entries(o.cats).sort((a, b) => b[1] - a[1])[0][0]);
   const rows = Object.entries(by).sort((a, b) => b[1].v - a[1].v).slice(0, 10);
-  $("#topMerch").innerHTML = rows.length ? rows.map(([m, o]) => `<div class="toprow"><div class="merch" style="min-width:0"><span class="n">${esc(m)}</span><span class="muted" style="font-size:12px">${esc(o.c)} · ${o.n}×</span></div><span class="num">${money(o.v)}</span></div>`).join("") : '<div class="empty">No spending in this period.</div>';
+  $("#topMerch").innerHTML = rows.length ? rows.map(([m, o], n) => `<button class="toprow" type="button" data-n="${n}"><span class="merch" style="min-width:0"><span class="n">${esc(m)}</span><span class="muted" style="font-size:12px">${esc(o.c)} · ${o.n}×</span></span><span class="num">${money(o.v)}</span></button>`).join("") : '<div class="empty">No spending in this period.</div>';
+  $("#topMerch").querySelectorAll(".toprow").forEach(b => b.onclick = () => { const m = rows[+b.dataset.n][0]; drillTo(m, spend.filter(t => t.merchant === m).map(t => t.id)); });
 }
 
 function txView(tx) {
   const q = $("#tSearch").value.trim().toLowerCase(), c = $("#tCat").value, k = $("#tKind").value;
-  let rows = tx.filter(t => (!c || t.category === c) && (!k || (k === "transfer" ? t.kind === "transfer" : t.kind === k)) && (!q || (t.merchant + " " + t.desc).toLowerCase().includes(q)));
+  const dr = S.drill && S.drill.ids;
+  let rows = tx.filter(t => (!dr || dr.has(t.id)) && (!c || t.category === c) && (!k || (k === "transfer" ? t.kind === "transfer" : t.kind === k)) && (!q || (t.merchant + " " + t.desc).toLowerCase().includes(q)));
   const { key, dir } = S.sort;
   rows.sort((a, b) => key === "amount" ? (a.amount - b.amount) * dir : a.date.localeCompare(b.date) * dir || (a.amount - b.amount));
   return rows;
@@ -898,6 +916,7 @@ function renderTx(tx) {
   const rows = txView(tx);
   const sum = rows.reduce((a, t) => a + t.amount, 0);
   $("#tCount").textContent = `${rows.length.toLocaleString()} transactions · ${money(sum)}`;
+  const chip = $("#drillChip"); chip.hidden = !S.drill; if (S.drill) chip.querySelector("span").textContent = S.drill.label;
   const opts = [...CATS, "Income", "Transfer", "Card payment"];
   $("#txTable tbody").innerHTML = rows.length ? rows.slice(0, S.shown).map(t => `<tr><td class="mono" style="white-space:nowrap">${fmtDate(t.date)}</td><td><div class="merch"><span>${esc(t.merchant)}</span><span class="d2" title="${esc(t.desc)}">${esc(t.desc)}</span></div></td><td><select data-m="${esc(mkey(t.merchant))}" aria-label="Category for ${esc(t.merchant)}">${opts.map(o => `<option${o === t.category ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></td><td class="muted" style="white-space:nowrap">${esc(t.account)}</td><td class="amt${t.amount < 0 ? " neg" : ""}">${t.amount < 0 ? "+" : ""}${fmt2.format(Math.abs(t.amount))}</td></tr>`).join("") : '<tr><td colspan="5" class="empty">No transactions match.</td></tr>';
   $("#btnMore").hidden = rows.length <= S.shown;
@@ -954,6 +973,8 @@ $("#fRange").onchange = () => { const c = $("#fRange").value === "custom"; $("#f
 $("#fStart").onchange = $("#fEnd").onchange = $("#fAcct").onchange = () => render();
 $("#tSearch").oninput = () => { S.shown = 100; renderTx(filtered()); };
 $("#tCat").onchange = $("#tKind").onchange = () => { S.shown = 100; renderTx(filtered()); };
+$("#drillClear").onclick = () => { S.drill = null; $("#tKind").value = "spend"; S.shown = 100; renderTx(filtered()); };
+document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => { if (b.dataset.tab === "transactions" && S.drill) { S.drill = null; $("#tKind").value = "spend"; renderTx(filtered()); } }));
 $("#btnMore").onclick = () => { S.shown += 200; renderTx(filtered()); };
 document.querySelectorAll("#txTable th.sortable").forEach(th => th.onclick = () => { const k = th.dataset.sort; S.sort = { key: k, dir: S.sort.key === k ? -S.sort.dir : -1 }; renderTx(filtered()); });
 $("#btnClear").onclick = () => { S.files = []; S.txns = []; S.sample = false; refreshAccounts(); render(); setStatus("All files removed."); };
