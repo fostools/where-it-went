@@ -230,8 +230,7 @@ button.toprow:hover { background: var(--surface-2) }
           <div class="cats" id="cats"></div>
         </div>
         <div class="card span-12">
-          <header><div><h2>Money flow</h2><div class="sub" id="skSub">Account → category → biggest merchants · click any part to see its transactions</div></div>
-            <div class="filters"><label for="skPeriod">Show</label><select id="skPeriod"></select></div></header>
+          <header><div><h2>Money flow</h2><div class="sub" id="skSub">Account → category → biggest merchants · click any part to see its transactions</div></div></header>
           <div class="chart" id="sankey"></div>
         </div>
         <div class="card span-7">
@@ -672,6 +671,8 @@ function rangeBounds() {
   const v = $("#fRange").value, end = dataEnd();
   if (v === "all") return [null, null];
   if (v === "custom") return [$("#fStart").value || null, $("#fEnd").value || null];
+  if (v.startsWith("y:")) return [v.slice(2) + "-01-01", v.slice(2) + "-12-31"];
+  if (v.startsWith("m:")) return [v.slice(2) + "-01", v.slice(2) + "-31"];
   const e = new Date(end + "T00:00:00");
   if (v === "ytd") return [e.getFullYear() + "-01-01", end];
   const s = new Date(e.getFullYear(), e.getMonth() - (+v) + 1, 1);
@@ -681,7 +682,27 @@ function filtered() {
   const [s, e] = rangeBounds(), a = $("#fAcct").value;
   return S.txns.filter(t => (!s || t.date >= s) && (!e || t.date <= e) && (!a || t.account === a));
 }
+function periodLabel() {
+  const sel = $("#fRange"), v = sel.value;
+  if (v === "all") return "all dates";
+  if (v === "custom") { const [a, b] = rangeBounds(); return (a ? fmtDate(a) : "start") + " – " + (b ? fmtDate(b) : "today"); }
+  if (v.startsWith("y:")) return v.slice(2);
+  if (v.startsWith("m:")) return MON[+v.slice(7) - 1] + " " + v.slice(2, 6);
+  return sel.options[sel.selectedIndex].text.toLowerCase();
+}
+function refreshPeriods() {
+  const sel = $("#fRange"), cur = sel.value;
+  const years = [...new Set(S.txns.map(t => t.date.slice(0, 4)))].sort().reverse();
+  const months = [...new Set(S.txns.map(t => t.date.slice(0, 7)))].sort().reverse();
+  sel.innerHTML = `<option value="all">All dates</option><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="10">Last 10 months</option><option value="12">Last 12 months</option><option value="ytd">Year to date</option>` +
+    (years.length ? `<optgroup label="Year">${years.map(y => `<option value="y:${y}">${y}</option>`).join("")}</optgroup>` : "") +
+    (months.length ? `<optgroup label="Month">${months.map(m => `<option value="m:${m}">${MON[+m.slice(5) - 1]} ${m.slice(0, 4)}</option>`).join("")}</optgroup>` : "") +
+    `<option value="custom">Custom…</option>`;
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : "all";
+  const c = sel.value === "custom"; $("#fStart").hidden = $("#fEnd").hidden = !c;
+}
 function refreshAccounts() {
+  refreshPeriods();
   const sel = $("#fAcct"), cur = sel.value;
   const accts = [...new Set(S.txns.map(t => t.account))].sort();
   sel.innerHTML = '<option value="">All accounts</option>' + accts.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
@@ -903,21 +924,9 @@ function drillTo(label, ids) {
   showTab("transactions"); renderTx(filtered());
 }
 function renderSankey() {
-  const box = $("#sankey"), sel = $("#skPeriod");
-  const acctF = $("#fAcct").value;
-  const base = S.txns.filter(t => t.kind === "spend" && (!acctF || t.account === acctF));
-  const years = [...new Set(base.map(t => t.date.slice(0, 4)))].sort().reverse();
-  const months = [...new Set(base.map(t => t.date.slice(0, 7)))].sort().reverse();
-  const opts = [["all", "All dates"], ...years.map(y => ["y:" + y, "Year " + y]), ...months.map(m => ["m:" + m, MON[+m.slice(5) - 1] + " " + m.slice(0, 4)])];
-  const key = opts.map(o => o[0]).join(",");
-  if (sel.dataset.key !== key) {
-    const cur = sel.value;
-    sel.innerHTML = `<option value="all">All dates</option><optgroup label="Year">${years.map(y => `<option value="y:${y}">${y}</option>`).join("")}</optgroup><optgroup label="Month">${months.map(m => `<option value="m:${m}">${MON[+m.slice(5) - 1]} ${m.slice(0, 4)}</option>`).join("")}</optgroup>`;
-    sel.dataset.key = key;
-    sel.value = opts.some(o => o[0] === cur) ? cur : (years.length ? "y:" + years[0] : "all");
-  }
-  const v = sel.value;
-  const tx = v === "all" ? base : base.filter(t => t.date.startsWith(v.slice(2)));
+  const box = $("#sankey");
+  const tx = filtered().filter(t => t.kind === "spend");
+  const plabel = periodLabel();
   const narrow = (box.clientWidth || 700) < 640;
   // aggregate
   const catNet = {}; tx.forEach(t => catNet[t.category] = (catNet[t.category] || 0) + t.amount);
@@ -932,7 +941,11 @@ function renderSankey() {
     const mByCat = {};
     tx.forEach(t => { const c = catOf(t); if (c === OTHER || topCats.indexOf(c) > 4) return; (mByCat[c] = mByCat[c] || {}); (mByCat[c][t.merchant] = mByCat[c][t.merchant] || { v: 0, ids: [] }); mByCat[c][t.merchant].v += t.amount; mByCat[c][t.merchant].ids.push(t.id); });
     const total0 = cats.reduce((a, c) => a + c[1], 0);
-    for (const [c, ms] of Object.entries(mByCat)) Object.entries(ms).filter(([, o]) => o.v > total0 * 0.015).sort((a, b) => b[1].v - a[1].v).slice(0, 3).forEach(([m, o]) => { const l = { s: "c:" + c, t: "m:" + c + "\u0001" + m, v: o.v, ids: o.ids }; links.set(l.s + "\u0001" + l.t, l); });
+    const inflow = {}; links.forEach(l => { if (l.v > 0.5) inflow[l.t] = (inflow[l.t] || 0) + l.v; });
+    for (const [c, ms] of Object.entries(mByCat)) {
+      let room = inflow["c:" + c] || 0;   // a category can't send out more than came in (refunds net differently per merchant)
+      Object.entries(ms).filter(([, o]) => o.v > total0 * 0.015).sort((a, b) => b[1].v - a[1].v).slice(0, 3).forEach(([m, o]) => { if (o.v > room + 0.5) return; room -= o.v; const l = { s: "c:" + c, t: "m:" + c + "\u0001" + m, v: o.v, ids: o.ids }; links.set(l.s + "\u0001" + l.t, l); });
+    }
   }
   const L = [...links.values()].filter(l => l.v > 0.5);
   if (!L.length) { box.innerHTML = '<div class="empty">No spending in this period.</div>'; $("#skSub").textContent = "Account → category → biggest merchants"; return; }
@@ -977,7 +990,6 @@ function renderSankey() {
   svg += "</svg>";
   box.innerHTML = svg + '<div class="tip" hidden></div>';
   const total = totals[1];
-  const plabel = v === "all" ? "all dates" : v[0] === "y" ? v.slice(2) : MON[+v.slice(7) - 1] + " " + v.slice(2, 6);
   $("#skSub").textContent = `${money(total)} of spending in ${plabel} · click any part to see its transactions`;
   const tip = box.querySelector(".tip");
   const place = e => { const bx = box.getBoundingClientRect(); let x = e.clientX - bx.left + 14; if (x + 220 > bx.width) x = e.clientX - bx.left - 230; tip.style.left = Math.max(0, x) + "px"; tip.style.top = (e.clientY - bx.top + 12) + "px"; };
@@ -1075,7 +1087,6 @@ $("#fRange").onchange = () => { const c = $("#fRange").value === "custom"; $("#f
 $("#fStart").onchange = $("#fEnd").onchange = $("#fAcct").onchange = () => render();
 $("#tSearch").oninput = () => { S.shown = 100; renderTx(filtered()); };
 $("#tCat").onchange = $("#tKind").onchange = () => { S.shown = 100; renderTx(filtered()); };
-$("#skPeriod").onchange = () => renderSankey();
 $("#drillClear").onclick = () => { S.drill = null; $("#tKind").value = "spend"; S.shown = 100; renderTx(filtered()); };
 document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => { if (b.dataset.tab === "transactions" && S.drill) { S.drill = null; $("#tKind").value = "spend"; renderTx(filtered()); } }));
 $("#btnMore").onclick = () => { S.shown += 200; renderTx(filtered()); };

@@ -19,8 +19,11 @@ Overlapping or repeated statements are detected, so the same transaction is neve
 
 ## What it shows
 
+One **Period** filter (last 3/6/10/12 months, year to date, any single year or month, or custom dates) and one **Account** filter apply to every section of the page.
+
+
 - **Overview**: total and monthly spending, income, interest and fees, recurring cost, a monthly chart stacked by category, spending by category, top merchants. Click a category, a merchant, or "View transactions" on any finding to see the transactions behind it.
-- **Money flow**: a Sankey chart from account to category to biggest merchants, for all dates, a single year or a single month. Click any band or node to see its transactions.
+- **Money flow**: a Sankey chart from account to category to biggest merchants. Click any band or node to see its transactions.
 - **Things to look at**:
   - interest and fees by account
   - cash-advance charges (for example, Venmo paid with a credit card)
