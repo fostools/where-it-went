@@ -109,6 +109,11 @@ button, select, input { font: inherit; color: inherit }
 .tip .t { font-weight: 600; margin-bottom: 6px }
 .tip .row { display: flex; justify-content: space-between; gap: 16px }
 .tip .row .k { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2) }
+.chart .seg, .chart .hit, .chart .mlab { cursor: pointer }
+.tip .row.hi { font-weight: 600; color: var(--ink) } .tip .row.hi .k { color: var(--ink) }
+.tip .hint { margin-top: 6px; color: var(--ink-3); font-size: 11.5px }
+.legbtn { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 2px 4px; margin: -2px -4px; border-radius: 6px; color: var(--ink-2); font-size: 12.5px; cursor: pointer }
+.legbtn:hover { background: var(--surface-2); color: var(--ink) }
 .tip .tot { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; font-weight: 600 }
 
 /* category list */
@@ -875,30 +880,51 @@ function renderMonthChart(spend) {
   const top = Object.entries(catTot).sort((a, b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
   const keys = [...top, "Everything else"];
   const colors = [...SERIES.map(cssv), cssv("--other")];
-  const data = ms.map(m => { const row = { m, v: keys.map(() => 0) }; spend.filter(t => t.date.startsWith(m)).forEach(t => { const i = top.indexOf(t.category); row.v[i < 0 ? 5 : i] += t.amount; }); row.v = row.v.map(x => Math.max(0, x)); row.tot = row.v.reduce((a, b) => a + b, 0); return row; });
-  leg.innerHTML = keys.map((k, i) => `<span><i style="background:${colors[i]}"></i>${esc(k)}</span>`).join("");
+  const keyOf = t => { const i = top.indexOf(t.category); return i < 0 ? 5 : i; };
+  const data = ms.map(m => { const row = { m, v: keys.map(() => 0), ids: keys.map(() => []), all: [] }; spend.filter(t => t.date.startsWith(m)).forEach(t => { const j = keyOf(t); row.v[j] += t.amount; row.ids[j].push(t.id); row.all.push(t.id); }); row.v = row.v.map(x => Math.max(0, x)); row.tot = row.v.reduce((a, b) => a + b, 0); return row; });
+  const plabel = periodLabel();
+  leg.innerHTML = keys.map((k, i) => `<button type="button" class="legbtn" data-j="${i}" title="See all ${esc(k)} transactions"><i style="background:${colors[i]}"></i>${esc(k)}</button>`).join("");
+  leg.querySelectorAll(".legbtn").forEach(b => b.onclick = () => { const j = +b.dataset.j; drillTo(`${keys[j]} · ${plabel}`, spend.filter(t => keyOf(t) === j).map(t => t.id)); });
   const W = Math.max(320, box.clientWidth || 700), Hh = W < 500 ? 240 : 320, pl = 54, pr = 8, pt = 10, pb = 26;
   const maxV = Math.max(...data.map(d => d.tot)) || 1;
   const step = niceStep(maxV / 4), ymax = Math.ceil(maxV / step) * step;
   const iw = W - pl - pr, ih = Hh - pt - pb, bw = Math.max(4, Math.min(48, iw / data.length * 0.62));
   const x = i => pl + iw * (i + 0.5) / data.length, y = v => pt + ih - ih * v / ymax;
-  let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Monthly spending stacked by category">`;
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Monthly spending stacked by category. Click a bar or a segment to see its transactions.">`;
   for (let v = 0; v <= ymax + 1e-6; v += step) s += `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="${cssv("--line")}" stroke-width="1"/><text x="${pl - 8}" y="${y(v) + 4}" text-anchor="end">${shortMoney(v)}</text>`;
   const every = Math.ceil(data.length / Math.floor(iw / 46));
   data.forEach((d, i) => {
+    // full-height column hit area sits behind the bar: clicking empty space or the label opens the whole month
+    s += `<rect class="hit" data-i="${i}" x="${pl + iw * i / data.length}" y="${pt}" width="${iw / data.length}" height="${ih + pb}" fill="transparent"/>`;
     let acc = 0;
-    d.v.forEach((v, j) => { if (v <= 0) return; const y0 = y(acc), y1 = y(acc + v); const h = Math.max(0, y0 - y1 - (acc > 0 ? 2 : 0)); const isTop = d.v.slice(j + 1).every(z => z <= 0); s += `<path d="${barPath(x(i) - bw / 2, y1, bw, h, isTop ? Math.min(4, h / 2) : 0)}" fill="${colors[j]}"/>`; acc += v; });
-    if (i % every === 0) s += `<text x="${x(i)}" y="${Hh - 8}" text-anchor="middle">${monthLabel(d.m)}</text>`;
-    s += `<rect class="hit" data-i="${i}" x="${pl + iw * i / data.length}" y="${pt}" width="${iw / data.length}" height="${ih}" fill="transparent"/>`;
+    d.v.forEach((v, j) => { if (v <= 0) return; const y0 = y(acc), y1 = y(acc + v); const h = Math.max(0, y0 - y1 - (acc > 0 ? 2 : 0)); const isTop = d.v.slice(j + 1).every(z => z <= 0); s += `<path class="seg" data-i="${i}" data-j="${j}" d="${barPath(x(i) - bw / 2, y1, bw, Math.max(h, 1.5), isTop ? Math.min(4, h / 2) : 0)}" fill="${colors[j]}"/>`; acc += v; });
+    if (i % every === 0) s += `<text class="mlab" data-i="${i}" x="${x(i)}" y="${Hh - 8}" text-anchor="middle">${monthLabel(d.m)}</text>`;
   });
   s += "</svg>";
   box.innerHTML = s + '<div class="tip" hidden></div>';
   const tip = box.querySelector(".tip");
-  box.querySelectorAll(".hit").forEach(r => {
-    const show = () => { const d = data[+r.dataset.i]; tip.innerHTML = `<div class="t">${monthLabel(d.m)}</div>` + keys.map((k, j) => d.v[j] > 0 ? `<div class="row"><span class="k"><i style="width:8px;height:8px;border-radius:2px;display:inline-block;background:${colors[j]}"></i>${esc(k)}</span><span class="num">${money(d.v[j])}</span></div>` : "").join("") + `<div class="row tot"><span>Total</span><span class="num">${money(d.tot)}</span></div>`; tip.hidden = false; const bx = box.getBoundingClientRect(), rx = r.getBoundingClientRect(); let left = rx.left - bx.left + rx.width / 2 + 12; if (left + 200 > bx.width) left = rx.left - bx.left + rx.width / 2 - 212; tip.style.left = Math.max(0, left) + "px"; tip.style.top = "8px"; r.setAttribute("fill", "color-mix(in srgb, var(--ink) 5%, transparent)"); };
-    r.addEventListener("mouseenter", show); r.addEventListener("click", show);
-    r.addEventListener("mouseleave", () => { tip.hidden = true; r.setAttribute("fill", "transparent"); });
+  const show = (i, jHi) => {
+    const d = data[i];
+    tip.innerHTML = `<div class="t">${monthLabel(d.m)}</div>` + keys.map((k, j) => d.v[j] > 0 ? `<div class="row${j === jHi ? " hi" : ""}"><span class="k"><i style="width:8px;height:8px;border-radius:2px;display:inline-block;background:${colors[j]}"></i>${esc(k)}</span><span class="num">${money(d.v[j])}</span></div>` : "").join("") + `<div class="row tot"><span>Total</span><span class="num">${money(d.tot)}</span></div><div class="hint">${jHi != null ? "Click to see " + esc(keys[jHi]) + " transactions" : "Click to see this month's transactions"}</div>`;
+    tip.hidden = false;
+    const bx = box.getBoundingClientRect(), svgEl = box.querySelector("svg"), sc = svgEl.getBoundingClientRect().width / W;
+    let left = x(i) * sc + bw * sc / 2 + 12; if (left + 210 > bx.width) left = x(i) * sc - bw * sc / 2 - 222;
+    tip.style.left = Math.max(0, left) + "px"; tip.style.top = "8px";
+    box.querySelectorAll(".hit").forEach(h => h.setAttribute("fill", +h.dataset.i === i ? "color-mix(in srgb, var(--ink) 5%, transparent)" : "transparent"));
+    box.querySelectorAll(".seg").forEach(p => p.setAttribute("opacity", +p.dataset.i === i && jHi != null && +p.dataset.j !== jHi ? "0.55" : "1"));
+  };
+  const hide = () => { tip.hidden = true; box.querySelectorAll(".hit").forEach(h => h.setAttribute("fill", "transparent")); box.querySelectorAll(".seg").forEach(p => p.setAttribute("opacity", "1")); };
+  box.querySelectorAll(".hit, .mlab").forEach(r => {
+    const i = +r.dataset.i;
+    r.addEventListener("mouseenter", () => show(i, null));
+    r.addEventListener("click", () => drillTo(`${monthLabel(data[i].m).replace(" ", " 20")}`, data[i].all));
   });
+  box.querySelectorAll(".seg").forEach(p => {
+    const i = +p.dataset.i, j = +p.dataset.j;
+    p.addEventListener("mouseenter", () => show(i, j));
+    p.addEventListener("click", () => drillTo(`${keys[j]} · ${monthLabel(data[i].m).replace(" ", " 20")}`, data[i].ids[j]));
+  });
+  box.querySelector("svg").addEventListener("mouseleave", hide);
 }
 function barPath(x, y, w, h, r) { if (h <= 0) return ""; if (!r) return `M${x},${y}h${w}v${h}h${-w}z`; return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}z`; }
 function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw || 1))), n = raw / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
